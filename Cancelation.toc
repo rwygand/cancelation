@@ -1,0 +1,9 @@
+## Interface: 120001
+## Title: Cancelation
+## Notes: Automatically cancels unwanted buffs from the player.
+## Version: 1.0.0
+## SavedVariables: CancelationDB
+## IconTexture: Interface\Icons\Spell_Shadow_NightOfTheDead
+
+Core.lua
+Config.lua
