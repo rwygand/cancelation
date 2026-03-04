@@ -1,0 +1,4 @@
+package-as: Cancelation
+
+ignore:
+    - logo.png
