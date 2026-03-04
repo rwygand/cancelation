@@ -5,6 +5,10 @@ on:
   push:
     tags:
       - '**'
+env:
+  CF_API_KEY: ${{ secrets.CF_API_KEY }}
+  WOWI_API_TOKEN: ${{ secrets.WOWI_API_TOKEN }}
+  WAGO_API_TOKEN: ${{ secrets.WAGO_API_TOKEN }}
 
 jobs:
   release: # "release" is a job, you can name it anything you want
@@ -15,7 +19,3 @@ jobs:
           fetch-depth: 0 # reads history for commit changelog
 
       - uses: BigWigsMods/packager@v2
-        with:
-          cf-api-key: ${{ secrets.CF_API_KEY }}
-          wowi-api-token: ${{ secrets.WOWI_API_TOKEN }}
-          wago-api-token: ${{ secrets.WAGO_API_TOKEN }}
