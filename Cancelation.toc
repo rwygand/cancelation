@@ -4,6 +4,7 @@
 ## Version: 1.0.0
 ## SavedVariables: CancelationDB
 ## IconTexture: Interface\Icons\Spell_Shadow_NightOfTheDead
+## X-Curse-Project-ID: 1477163
 
 Core.lua
 Config.lua
