@@ -64,7 +64,10 @@ function ns.RemoveBuff(index)
     end
 end
 
+local inCombat = false
+
 local function CheckAndCancelBuffs()
+    if inCombat then return end
     if #CancelationDB.buffs == 0 then return end
 
     local canceledAny = true
@@ -78,9 +81,9 @@ local function CheckAndCancelBuffs()
 
             local shouldCancel = false
 
-            if auraData.spellId and idLookup[auraData.spellId] then
+            if auraData.spellId and auraData.spellId ~= 0 and idLookup[auraData.spellId] then
                 shouldCancel = true
-            elseif auraData.name and nameLookup[auraData.name:lower()] then
+            elseif auraData.name and auraData.name ~= "" and nameLookup[auraData.name:lower()] then
                 shouldCancel = true
                 -- Resolve the spell ID if we only had the name
                 local idx = nameLookup[auraData.name:lower()]
@@ -106,6 +109,7 @@ end
 local lastCheck = 0
 local checkPending = false
 local function ScheduleCheck()
+    if inCombat then return end
     if checkPending then return end
     checkPending = true
     local delay = math.max(1.0 - (GetTime() - lastCheck), 0)
@@ -120,6 +124,8 @@ end
 local frame = CreateFrame("Frame")
 frame:RegisterEvent("PLAYER_LOGIN")
 frame:RegisterEvent("UNIT_AURA")
+frame:RegisterEvent("PLAYER_REGEN_DISABLED") -- enter combat
+frame:RegisterEvent("PLAYER_REGEN_ENABLED")  -- leave combat
 
 frame:SetScript("OnEvent", function(self, event, ...)
     if event == "PLAYER_LOGIN" then
@@ -139,6 +145,13 @@ frame:SetScript("OnEvent", function(self, event, ...)
         end
 
         print("|cff00ccffCancelation|r loaded. Type |cff00ff00/cancel|r for help.")
+    elseif event == "PLAYER_REGEN_DISABLED" then
+        inCombat = true
+        checkPending = false -- discard any pending check
+    elseif event == "PLAYER_REGEN_ENABLED" then
+        inCombat = false
+        -- Run a check immediately on combat exit in case buffs were applied during combat
+        ScheduleCheck()
     elseif event == "UNIT_AURA" then
         local unit = ...
         if unit == "player" then
