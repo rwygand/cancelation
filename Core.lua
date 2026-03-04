@@ -67,42 +67,51 @@ end
 local function CheckAndCancelBuffs()
     if #CancelationDB.buffs == 0 then return end
 
-    for i = 1, 40 do
-        local auraData = C_UnitAuras.GetAuraDataByIndex("player", i, "HELPFUL")
-        if not auraData then break end
+    local canceledAny = true
+    local passes = 0
+    while canceledAny and passes < 5 do
+        canceledAny = false
+        passes = passes + 1
+        for i = 1, 40 do
+            local auraData = C_UnitAuras.GetAuraDataByIndex("player", i, "HELPFUL")
+            if not auraData then break end
 
-        local shouldCancel = false
+            local shouldCancel = false
 
-        if auraData.spellId and idLookup[auraData.spellId] then
-            shouldCancel = true
-        elseif auraData.name and nameLookup[auraData.name:lower()] then
-            shouldCancel = true
-            -- Resolve the spell ID if we only had the name
-            local idx = nameLookup[auraData.name:lower()]
-            if idx and CancelationDB.buffs[idx] and not CancelationDB.buffs[idx].id then
-                CancelationDB.buffs[idx].id = auraData.spellId
-                ns.RebuildLookups()
-                if ns.RefreshConfig then
-                    ns.RefreshConfig()
+            if auraData.spellId and idLookup[auraData.spellId] then
+                shouldCancel = true
+            elseif auraData.name and nameLookup[auraData.name:lower()] then
+                shouldCancel = true
+                -- Resolve the spell ID if we only had the name
+                local idx = nameLookup[auraData.name:lower()]
+                if idx and CancelationDB.buffs[idx] and not CancelationDB.buffs[idx].id then
+                    CancelationDB.buffs[idx].id = auraData.spellId
+                    ns.RebuildLookups()
+                    if ns.RefreshConfig then
+                        ns.RefreshConfig()
+                    end
                 end
             end
-        end
 
-        if shouldCancel then
-            CancelUnitBuff("player", i, "HELPFUL")
-            -- Indices shift after canceling, so restart the scan
-            return CheckAndCancelBuffs()
+            if shouldCancel then
+                CancelUnitBuff("player", i, "HELPFUL")
+                canceledAny = true
+                break -- restart the for-loop via the while, not via recursion
+            end
         end
     end
 end
 
--- Throttled check to batch rapid UNIT_AURA events
+-- Throttled check - at most once per second regardless of how many UNIT_AURA events fire
+local lastCheck = 0
 local checkPending = false
 local function ScheduleCheck()
     if checkPending then return end
     checkPending = true
-    C_Timer.After(0.1, function()
+    local delay = math.max(1.0 - (GetTime() - lastCheck), 0)
+    C_Timer.After(delay, function()
         checkPending = false
+        lastCheck = GetTime()
         CheckAndCancelBuffs()
     end)
 end
@@ -118,8 +127,11 @@ frame:SetScript("OnEvent", function(self, event, ...)
         CancelationDB.buffs = CancelationDB.buffs or {}
         ns.RebuildLookups()
 
-        -- Periodic safety-net check every 2 seconds
-        C_Timer.NewTicker(2, CheckAndCancelBuffs)
+        -- Initial check once saved variables are ready
+        C_Timer.After(1, function()
+            lastCheck = GetTime()
+            CheckAndCancelBuffs()
+        end)
 
         -- Initialize the config panel after saved variables are ready
         if ns.InitConfig then
