@@ -88,7 +88,7 @@ end
 local inCombat = false
 
 local function CheckAndCancelBuffs()
-    if inCombat then return end
+    if InCombatLockdown() then return end
     if #CancelationDB.buffs == 0 then return end
 
     local canceledAny = true
@@ -144,6 +144,7 @@ local function ScheduleCheck()
     local delay = math.max(GetMinInterval() - (GetTime() - lastCheck), 0)
     C_Timer.After(delay, function()
         checkPending = false
+        if InCombatLockdown() then return end
         lastCheck = GetTime()
         CheckAndCancelBuffs()
     end)
