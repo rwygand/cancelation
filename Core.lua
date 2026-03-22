@@ -1,7 +1,7 @@
 local addonName, ns = ...
 
 -- Saved variable defaults
-local defaults = { buffs = {} }
+local defaults = { buffs = {}, defaultInterval = 1.0 }
 
 -- Lookup tables for fast aura matching
 local idLookup = {}
@@ -18,6 +18,27 @@ function ns.RebuildLookups()
             nameLookup[entry.name:lower()] = i
         end
     end
+end
+
+function ns.GetEffectiveInterval(entry)
+    return entry and entry.interval or CancelationDB.defaultInterval or 1.0
+end
+
+-- Runtime tracking of per-buff last-cancel-attempt times (keyed by spellId or lowercase name)
+local lastAttempt = {}
+
+local function GetAttemptKey(entry)
+    return entry.id or (entry.name and entry.name:lower())
+end
+
+local function GetMinInterval()
+    local minInterval = CancelationDB.defaultInterval or 1.0
+    for _, entry in ipairs(CancelationDB.buffs) do
+        if entry.interval and entry.interval < minInterval then
+            minInterval = entry.interval
+        end
+    end
+    return minInterval
 end
 
 function ns.AddBuff(input)
@@ -97,9 +118,17 @@ local function CheckAndCancelBuffs()
             end
 
             if shouldCancel then
-                CancelUnitBuff("player", i, "HELPFUL")
-                canceledAny = true
-                break -- restart the for-loop via the while, not via recursion
+                local buffIdx = idLookup[auraData.spellId] or (auraData.name and nameLookup[auraData.name:lower()])
+                local entry = buffIdx and CancelationDB.buffs[buffIdx]
+                local key = entry and GetAttemptKey(entry)
+                local interval = ns.GetEffectiveInterval(entry)
+                local now = GetTime()
+                if key and (not lastAttempt[key] or (now - lastAttempt[key]) >= interval) then
+                    lastAttempt[key] = now
+                    CancelUnitBuff("player", i, "HELPFUL")
+                    canceledAny = true
+                    break
+                end
             end
         end
     end
@@ -112,7 +141,7 @@ local function ScheduleCheck()
     if inCombat then return end
     if checkPending then return end
     checkPending = true
-    local delay = math.max(1.0 - (GetTime() - lastCheck), 0)
+    local delay = math.max(GetMinInterval() - (GetTime() - lastCheck), 0)
     C_Timer.After(delay, function()
         checkPending = false
         lastCheck = GetTime()
@@ -131,6 +160,7 @@ frame:SetScript("OnEvent", function(self, event, ...)
     if event == "PLAYER_LOGIN" then
         CancelationDB = CancelationDB or CopyTable(defaults)
         CancelationDB.buffs = CancelationDB.buffs or {}
+        CancelationDB.defaultInterval = CancelationDB.defaultInterval or defaults.defaultInterval
         ns.RebuildLookups()
 
         -- Initial check once saved variables are ready
