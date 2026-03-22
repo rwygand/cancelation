@@ -64,10 +64,100 @@ function ns.InitConfig()
     listHeader:SetPoint("TOPLEFT", inputBox, "BOTTOMLEFT", -6, -20)
     listHeader:SetText("Unwanted Buffs:")
 
-    -- Scroll frame for the buff list
+    -- Import/Export section (anchored to bottom of panel, built first so scroll frame can reference it)
+    local separator = panel:CreateTexture(nil, "ARTWORK")
+    separator:SetHeight(1)
+    separator:SetColorTexture(0.5, 0.5, 0.5, 0.5)
+    separator:SetPoint("BOTTOMLEFT", panel, "BOTTOMLEFT", 8, 80)
+    separator:SetPoint("BOTTOMRIGHT", panel, "BOTTOMRIGHT", -8, 80)
+
+    -- Export row
+    local exportLabel = panel:CreateFontString(nil, "ARTWORK", "GameFontNormal")
+    exportLabel:SetPoint("TOPLEFT", separator, "BOTTOMLEFT", 0, -8)
+    exportLabel:SetText("Export:")
+
+    local exportBox = CreateFrame("EditBox", nil, panel, "InputBoxTemplate")
+    exportBox:SetHeight(20)
+    exportBox:SetPoint("LEFT", exportLabel, "RIGHT", 8, 0)
+    exportBox:SetPoint("RIGHT", panel, "RIGHT", -96, 0)
+    exportBox:SetAutoFocus(false)
+
+    local exportBtn = CreateFrame("Button", nil, panel, "UIPanelButtonTemplate")
+    exportBtn:SetSize(80, 22)
+    exportBtn:SetPoint("LEFT", exportBox, "RIGHT", 8, 0)
+    exportBtn:SetText("Export")
+
+    exportBtn:SetScript("OnClick", function()
+        local parts = {}
+        for _, entry in ipairs(CancelationDB.buffs) do
+            local id = entry.id and tostring(entry.id) or ""
+            local name = entry.name or ""
+            table.insert(parts, id .. "," .. name)
+        end
+        exportBox:SetText(table.concat(parts, ";"))
+        exportBox:HighlightText()
+        exportBox:SetFocus()
+    end)
+
+    exportBox:SetScript("OnEscapePressed", function(self) self:ClearFocus() end)
+
+    -- Import row
+    local importLabel = panel:CreateFontString(nil, "ARTWORK", "GameFontNormal")
+    importLabel:SetPoint("TOPLEFT", exportLabel, "BOTTOMLEFT", 0, -12)
+    importLabel:SetText("Import:")
+
+    local importBox = CreateFrame("EditBox", nil, panel, "InputBoxTemplate")
+    importBox:SetHeight(20)
+    importBox:SetPoint("LEFT", importLabel, "RIGHT", 8, 0)
+    importBox:SetPoint("RIGHT", panel, "RIGHT", -96, 0)
+    importBox:SetAutoFocus(false)
+
+    local importBtn = CreateFrame("Button", nil, panel, "UIPanelButtonTemplate")
+    importBtn:SetSize(80, 22)
+    importBtn:SetPoint("LEFT", importBox, "RIGHT", 8, 0)
+    importBtn:SetText("Import")
+
+    local function DoImport(text)
+        if not text or text:trim() == "" then return end
+        local entries = {}
+        local malformed = 0
+        for part in text:gmatch("[^;]+") do
+            part = part:trim()
+            if part ~= "" then
+                local idStr, name = part:match("^(%d*),(.+)$")
+                if name then
+                    name = name:trim()
+                    local id = tonumber(idStr)
+                    table.insert(entries, { id = id, name = (name ~= "") and name or nil })
+                else
+                    malformed = malformed + 1
+                end
+            end
+        end
+        local added, skipped = ns.ImportBuffs(entries)
+        local msg = "|cff00ccffCancelation:|r Import complete: " .. added .. " added, " .. skipped .. " skipped"
+        if malformed > 0 then
+            msg = msg .. ", " .. malformed .. " malformed"
+        end
+        print(msg .. ".")
+        importBox:SetText("")
+        importBox:ClearFocus()
+    end
+
+    importBtn:SetScript("OnClick", function()
+        DoImport(importBox:GetText())
+    end)
+
+    importBox:SetScript("OnEnterPressed", function(self)
+        DoImport(self:GetText())
+    end)
+
+    importBox:SetScript("OnEscapePressed", function(self) self:ClearFocus() end)
+
+    -- Scroll frame for the buff list (bottom anchored above the import/export section)
     local scrollFrame = CreateFrame("ScrollFrame", "CancelationScrollFrame", panel, "UIPanelScrollFrameTemplate")
     scrollFrame:SetPoint("TOPLEFT", listHeader, "BOTTOMLEFT", 0, -8)
-    scrollFrame:SetPoint("BOTTOMRIGHT", panel, "BOTTOMRIGHT", -30, 16)
+    scrollFrame:SetPoint("BOTTOMRIGHT", separator, "TOPRIGHT", -30, 8)
 
     local scrollChild = CreateFrame("Frame", "CancelationScrollChild")
     scrollFrame:SetScrollChild(scrollChild)

@@ -67,6 +67,38 @@ function ns.AddBuff(input)
     return true
 end
 
+-- Batch import: entries is a list of { id = number|nil, name = string|nil }
+-- Returns added, skipped counts. Single rebuild/refresh/check at the end.
+function ns.ImportBuffs(entries)
+    local added, skipped = 0, 0
+    for _, entry in ipairs(entries) do
+        local id, name = entry.id, entry.name
+        local isDuplicate = false
+        if id and idLookup[id] then
+            isDuplicate = true
+        elseif name and nameLookup[name:lower()] then
+            isDuplicate = true
+        end
+        if isDuplicate then
+            print("|cff00ccffCancelation:|r Import skipped (already exists): " .. (name or ("Spell #" .. (id or "?"))))
+            skipped = skipped + 1
+        else
+            table.insert(CancelationDB.buffs, { id = id, name = name })
+            added = added + 1
+        end
+    end
+    if added > 0 then
+        ns.RebuildLookups()
+        if ns.RefreshConfig then
+            ns.RefreshConfig()
+        end
+        if ns.CheckNow then
+            C_Timer.After(0, ns.CheckNow)
+        end
+    end
+    return added, skipped
+end
+
 function ns.RemoveBuff(index)
     local entry = CancelationDB.buffs[index]
     if not entry then return end
