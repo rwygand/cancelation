@@ -24,21 +24,11 @@ function ns.GetEffectiveInterval(entry)
     return entry and entry.interval or CancelationDB.defaultInterval or 1.0
 end
 
--- Runtime tracking of per-buff last-cancel-attempt times (keyed by spellId or lowercase name)
-local lastAttempt = {}
+-- Runtime tracking of per-buff last-cancel times (keyed by spellId or lowercase name)
+local lastCancel = {}
 
-local function GetAttemptKey(entry)
+local function GetCancelKey(entry)
     return entry.id or (entry.name and entry.name:lower())
-end
-
-local function GetMinInterval()
-    local minInterval = CancelationDB.defaultInterval or 1.0
-    for _, entry in ipairs(CancelationDB.buffs) do
-        if entry.interval and entry.interval < minInterval then
-            minInterval = entry.interval
-        end
-    end
-    return minInterval
 end
 
 function ns.AddBuff(input)
@@ -70,12 +60,18 @@ function ns.AddBuff(input)
     if ns.RefreshConfig then
         ns.RefreshConfig()
     end
+    -- Check immediately in case the player already has this buff
+    if ns.CheckNow then
+        C_Timer.After(0, ns.CheckNow)
+    end
     return true
 end
 
 function ns.RemoveBuff(index)
     local entry = CancelationDB.buffs[index]
     if not entry then return end
+    local key = GetCancelKey(entry)
+    if key then lastCancel[key] = nil end
     local name = entry.name or ("Spell #" .. entry.id)
     table.remove(CancelationDB.buffs, index)
     ns.RebuildLookups()
@@ -86,11 +82,14 @@ function ns.RemoveBuff(index)
 end
 
 local inCombat = false
+local ScheduleRetry -- forward declaration
 
 local function CheckAndCancelBuffs()
     if InCombatLockdown() then return end
     if #CancelationDB.buffs == 0 then return end
 
+    local now = GetTime()
+    local needsRebuild = false
     local canceledAny = true
     local passes = 0
     while canceledAny and passes < 5 do
@@ -101,47 +100,75 @@ local function CheckAndCancelBuffs()
             if not auraData then break end
 
             local shouldCancel = false
+            local buffIdx
 
             if auraData.spellId and auraData.spellId ~= 0 and idLookup[auraData.spellId] then
                 shouldCancel = true
-            elseif auraData.name and auraData.name ~= "" and nameLookup[auraData.name:lower()] then
-                shouldCancel = true
-                -- Resolve the spell ID if we only had the name
-                local idx = nameLookup[auraData.name:lower()]
-                if idx and CancelationDB.buffs[idx] and not CancelationDB.buffs[idx].id then
-                    CancelationDB.buffs[idx].id = auraData.spellId
-                    ns.RebuildLookups()
-                    if ns.RefreshConfig then
-                        ns.RefreshConfig()
+                buffIdx = idLookup[auraData.spellId]
+            else
+                local lowerName = auraData.name and auraData.name ~= "" and auraData.name:lower()
+                if lowerName and nameLookup[lowerName] then
+                    shouldCancel = true
+                    buffIdx = nameLookup[lowerName]
+                    -- Resolve the spell ID if we only had the name (deferred rebuild after loop)
+                    if buffIdx and CancelationDB.buffs[buffIdx] and not CancelationDB.buffs[buffIdx].id then
+                        CancelationDB.buffs[buffIdx].id = auraData.spellId
+                        needsRebuild = true
                     end
                 end
             end
 
-            if shouldCancel then
-                local buffIdx = idLookup[auraData.spellId] or (auraData.name and nameLookup[auraData.name:lower()])
-                local entry = buffIdx and CancelationDB.buffs[buffIdx]
-                local key = entry and GetAttemptKey(entry)
+            if shouldCancel and buffIdx then
+                local entry = CancelationDB.buffs[buffIdx]
+                local key = GetCancelKey(entry)
                 local interval = ns.GetEffectiveInterval(entry)
-                local now = GetTime()
-                if key and (not lastAttempt[key] or (now - lastAttempt[key]) >= interval) then
-                    lastAttempt[key] = now
+                -- Only cancel if enough time has passed since last cancel of this buff
+                if key and (not lastCancel[key] or (now - lastCancel[key]) >= interval) then
                     CancelUnitBuff("player", i, "HELPFUL")
+                    lastCancel[key] = now
                     canceledAny = true
                     break
+                else
+                    -- Interval not yet elapsed; schedule a retry for when it is
+                    local remaining = interval - (now - (lastCancel[key] or now))
+                    ScheduleRetry(remaining)
                 end
             end
         end
     end
+
+    if needsRebuild then
+        ns.RebuildLookups()
+        if ns.RefreshConfig then
+            ns.RefreshConfig()
+        end
+    end
 end
 
--- Throttled check - at most once per second regardless of how many UNIT_AURA events fire
+ns.CheckNow = CheckAndCancelBuffs
+
+-- Schedule a one-shot retry when a buff was skipped due to interval
+local retryPending = false
+function ScheduleRetry(delay)
+    if retryPending then return end
+    retryPending = true
+    C_Timer.After(delay, function()
+        retryPending = false
+        if not InCombatLockdown() then
+            CheckAndCancelBuffs()
+        end
+    end)
+end
+
+-- Throttled check - coalesces rapid UNIT_AURA events
+local COALESCE_WINDOW = 0.1
 local lastCheck = 0
 local checkPending = false
 local function ScheduleCheck()
     if inCombat then return end
     if checkPending then return end
     checkPending = true
-    local delay = math.max(GetMinInterval() - (GetTime() - lastCheck), 0)
+    local delay = math.max(COALESCE_WINDOW - (GetTime() - lastCheck), 0)
     C_Timer.After(delay, function()
         checkPending = false
         if InCombatLockdown() then return end
@@ -153,7 +180,7 @@ end
 -- Main event frame
 local frame = CreateFrame("Frame")
 frame:RegisterEvent("PLAYER_LOGIN")
-frame:RegisterEvent("UNIT_AURA")
+frame:RegisterUnitEvent("UNIT_AURA", "player")
 frame:RegisterEvent("PLAYER_REGEN_DISABLED") -- enter combat
 frame:RegisterEvent("PLAYER_REGEN_ENABLED")  -- leave combat
 
@@ -178,16 +205,13 @@ frame:SetScript("OnEvent", function(self, event, ...)
         print("|cff00ccffCancelation|r loaded. Type |cff00ff00/cancel|r for help.")
     elseif event == "PLAYER_REGEN_DISABLED" then
         inCombat = true
-        checkPending = false -- discard any pending check
+        checkPending = false
+        retryPending = false
     elseif event == "PLAYER_REGEN_ENABLED" then
         inCombat = false
-        -- Run a check immediately on combat exit in case buffs were applied during combat
         ScheduleCheck()
     elseif event == "UNIT_AURA" then
-        local unit = ...
-        if unit == "player" then
-            ScheduleCheck()
-        end
+        ScheduleCheck()
     end
 end)
 
