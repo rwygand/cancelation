@@ -13,9 +13,40 @@ function ns.InitConfig()
     desc:SetPoint("TOPLEFT", title, "BOTTOMLEFT", 0, -8)
     desc:SetText("Manage the list of buffs to automatically cancel.")
 
+    -- Global interval setting
+    local intervalLabel = panel:CreateFontString(nil, "ARTWORK", "GameFontNormal")
+    intervalLabel:SetPoint("TOPLEFT", desc, "BOTTOMLEFT", 0, -16)
+    intervalLabel:SetText("Default check interval (seconds):")
+
+    local intervalBox = CreateFrame("EditBox", "CancelationIntervalBox", panel, "InputBoxTemplate")
+    intervalBox:SetSize(60, 20)
+    intervalBox:SetPoint("LEFT", intervalLabel, "RIGHT", 8, 0)
+    intervalBox:SetAutoFocus(false)
+    intervalBox:SetText(tostring(CancelationDB.defaultInterval or 1.0))
+
+    intervalBox:SetScript("OnEnterPressed", function(self)
+        local val = tonumber(self:GetText())
+        if val and val >= 0.1 then
+            CancelationDB.defaultInterval = val
+            self:SetText(tostring(val))
+        else
+            self:SetText(tostring(CancelationDB.defaultInterval or 1.0))
+        end
+        self:ClearFocus()
+    end)
+
+    intervalBox:SetScript("OnEscapePressed", function(self)
+        self:SetText(tostring(CancelationDB.defaultInterval or 1.0))
+        self:ClearFocus()
+    end)
+
+    local intervalHint = panel:CreateFontString(nil, "ARTWORK", "GameFontHighlightSmall")
+    intervalHint:SetPoint("TOPLEFT", intervalLabel, "BOTTOMLEFT", 0, -4)
+    intervalHint:SetText("How often to check for unwanted buffs. Per-buff overrides can be set below (blank = use default).")
+
     -- Input area
     local inputLabel = panel:CreateFontString(nil, "ARTWORK", "GameFontNormal")
-    inputLabel:SetPoint("TOPLEFT", desc, "BOTTOMLEFT", 0, -16)
+    inputLabel:SetPoint("TOPLEFT", intervalHint, "BOTTOMLEFT", 0, -16)
     inputLabel:SetText("Add buff (name or spell ID):")
 
     local inputBox = CreateFrame("EditBox", "CancelationInputBox", panel, "InputBoxTemplate")
@@ -82,6 +113,17 @@ function ns.InitConfig()
         idText:SetJustifyH("LEFT")
         row.idText = idText
 
+        local rowIntervalLabel = row:CreateFontString(nil, "ARTWORK", "GameFontHighlightSmall")
+        rowIntervalLabel:SetPoint("LEFT", idText, "RIGHT", 12, 0)
+        rowIntervalLabel:SetText("Interval:")
+        row.intervalLabel = rowIntervalLabel
+
+        local rowIntervalBox = CreateFrame("EditBox", nil, row, "InputBoxTemplate")
+        rowIntervalBox:SetSize(50, 20)
+        rowIntervalBox:SetPoint("LEFT", rowIntervalLabel, "RIGHT", 4, 0)
+        rowIntervalBox:SetAutoFocus(false)
+        row.intervalBox = rowIntervalBox
+
         local removeBtn = CreateFrame("Button", nil, row, "UIPanelButtonTemplate")
         removeBtn:SetSize(70, 22)
         removeBtn:SetPoint("RIGHT", row, "RIGHT", -4, 0)
@@ -92,6 +134,7 @@ function ns.InitConfig()
     end
 
     local function RefreshList()
+        intervalBox:SetText(tostring(CancelationDB.defaultInterval or 1.0))
         for _, row in ipairs(rows) do
             row:Hide()
         end
@@ -120,6 +163,25 @@ function ns.InitConfig()
 
             row.removeBtn:SetScript("OnClick", function()
                 ns.RemoveBuff(i)
+            end)
+
+            local entryInterval = entry.interval
+            row.intervalBox:SetText(entryInterval and tostring(entryInterval) or "")
+            row.intervalBox:SetScript("OnEnterPressed", function(self)
+                local val = tonumber(self:GetText())
+                if val and val >= 0.1 then
+                    CancelationDB.buffs[i].interval = val
+                elseif self:GetText():trim() == "" then
+                    CancelationDB.buffs[i].interval = nil
+                    self:SetText("")
+                else
+                    self:SetText(entryInterval and tostring(entryInterval) or "")
+                end
+                self:ClearFocus()
+            end)
+            row.intervalBox:SetScript("OnEscapePressed", function(self)
+                self:SetText(entryInterval and tostring(entryInterval) or "")
+                self:ClearFocus()
             end)
 
             row:Show()
