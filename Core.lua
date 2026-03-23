@@ -180,7 +180,10 @@ local function CheckAndCancelBuffs()
     if #CancelationDB.buffs == 0 then return end
     -- pcall catches taint errors when combat starts between the
     -- InCombatLockdown check and the aura data access
-    pcall(ScanAndCancelAuras)
+    local ok, err = pcall(ScanAndCancelAuras)
+    if not ok and err and not err:match("tainted") then
+        geterrorhandler()(err)
+    end
 end
 
 ns.CheckNow = CheckAndCancelBuffs
