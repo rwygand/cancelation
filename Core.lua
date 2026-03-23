@@ -116,10 +116,8 @@ end
 local inCombat = false
 local ScheduleRetry -- forward declaration
 
-local function CheckAndCancelBuffs()
-    if InCombatLockdown() then return end
-    if #CancelationDB.buffs == 0 then return end
-
+-- Inner scan function, separated so pcall can catch taint errors
+local function ScanAndCancelAuras()
     local now = GetTime()
     local needsRebuild = false
     local canceledAny = true
@@ -175,6 +173,14 @@ local function CheckAndCancelBuffs()
             ns.RefreshConfig()
         end
     end
+end
+
+local function CheckAndCancelBuffs()
+    if InCombatLockdown() then return end
+    if #CancelationDB.buffs == 0 then return end
+    -- pcall catches taint errors when combat starts between the
+    -- InCombatLockdown check and the aura data access
+    pcall(ScanAndCancelAuras)
 end
 
 ns.CheckNow = CheckAndCancelBuffs
